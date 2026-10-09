@@ -129,6 +129,28 @@ export function parseApodFeed(xml, limit) {
   return { title: "NASA 天文每日一图 (APOD)", link: "https://science.nasa.gov/apod/", items: out };
 }
 
+// ---------- 知乎日报 ----------
+// 官方 www.zhihu.com/rss 早就下线了（200 但 0 字节），日报这个是活的、免登录。
+export function parseZhihuDaily(json, day) {
+  var items = [];
+  var seen = {};
+  var push = function (s) {
+    if (!s || !s.id || seen[s.id]) return;
+    seen[s.id] = 1;
+    var img = (s.images && s.images[0]) || s.image || "";
+    items.push({
+      title: s.title,
+      link: s.url || ("https://daily.zhihu.com/story/" + s.id),
+      image: img,
+      pubDate: day,
+      description: s.hint ? "<p>" + esc(s.hint) + "</p>" : ""
+    });
+  };
+  (json.top_stories || []).forEach(push);
+  (json.stories || []).forEach(push);
+  return { title: "知乎日报" + (day ? " " + day.slice(0, 10) : ""), link: "https://daily.zhihu.com/", items: items };
+}
+
 // ---------- 北京天文馆 ----------
 export function parseBjpList(html, limit) {
   var out = [];

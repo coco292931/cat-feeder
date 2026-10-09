@@ -1,6 +1,6 @@
 import {
   UA, PIXIV_HEADERS, esc, buildFeed,
-  parseBing, parseApodFeed, parseBjpList, parseBjpItem,
+  parseBing, parseApodFeed, parseZhihuDaily, parseBjpList, parseBjpItem,
   parsePixivRanking, parsePixivUser, pixivRankApiMode,
   parseMittrchina, parseYcwb, parseAfdian, parseGuokr, parseYande
 } from "./lib.js";
@@ -39,6 +39,7 @@ function finalize(meta, items, origin, selfUrl) {
 const ROUTES = [
   ["/bing", "Bing 每日壁纸"],
   ["/nasa/apod", "NASA 天文每日一图"],
+  ["/zhihu/daily", "知乎日报（?date=YYYYMMDD 可翻历史）"],
   ["/bjp/apod", "北京天文馆 每日一图"],
   ["/pixiv/ranking/day", "pixiv 排行（day/week/month/day_male/day_female/week_original/week_rookie…）"],
   ["/pixiv/user/159912", "pixiv 用户动态（填 user id）"],
@@ -111,6 +112,19 @@ export default {
         const xml = await getText("https://science.nasa.gov/feed/apod-basic/");
         const p = parseApodFeed(xml, Math.min(Number(q.get("limit")) || 10, 30));
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
+      }
+
+      // ---- 知乎日报（原「知乎每日精选」的替代）----
+      if (seg[0] === "zhihu" && (seg[1] === "daily" || seg[1] === undefined)) {
+        const date = q.get("date");
+        const api = date && /^[0-9]{8}$/.test(date)
+          ? "https://daily.zhihu.com/api/4/news/before/" + date
+          : "https://daily.zhihu.com/api/4/news/latest";
+        const j = await getJson(api);
+        const d = String(j.date || "");
+        const day = d.length === 8 ? d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8) + "T00:00:00+08:00" : "";
+        const pz = parseZhihuDaily(j, day);
+        return new Response(finalize(pz, pz.items, origin, selfUrl), { headers: XML });
       }
 
       // ---- 北京天文馆 ----
