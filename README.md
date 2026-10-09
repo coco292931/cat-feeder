@@ -9,6 +9,7 @@
 | /bing | /bing | cn.bing.com/hp/api/model |
 | /nasa/apod | /nasa/apod | science.nasa.gov/feed/apod-basic/（官方 feed） |
 | /zhihu/daily?date=YYYYMMDD | /zhihu/daily | daily.zhihu.com/api/4/news/…（免登录；官方的 www.zhihu.com/rss 已下线） |
+| /aihot/daily?limit=7&date= | — | aihot.news/api/v1/agent/daily（它给 Agent 用的 Markdown 版，本来就是「头条 → 各栏目 + 简介 → 快讯」，这里只是把外层给 AI 的说明剥掉；期号按 2026-04-22 = 第 1 期算出来） |
 | /bjp/apod?limit=10 | /bjp/apod | www.bjp.org.cn/APOD/list.shtml（抓页面） |
 | /pixiv/ranking/:mode | /pixiv/ranking/:mode | www.pixiv.net/ranking.php?format=json（免 token） |
 | /pixiv/user/:id?limit=12 | /pixiv/user/:id | www.pixiv.net/ajax/user/... （免 token） |

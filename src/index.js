@@ -1,6 +1,6 @@
 import {
   UA, PIXIV_HEADERS, esc, buildFeed,
-  parseBing, parseApodFeed, parseZhihuDaily, parseBjpList, parseBjpItem,
+  parseBing, parseApodFeed, parseZhihuDaily, renderAihotMarkdown, aihotLeadOf, parseAihotHighlights, parseAihotLead, aihotDailyCover, parseBjpList, parseBjpItem,
   parsePixivRanking, parsePixivUser, pixivRankApiMode,
   parseMittrchina, parseYcwb, parseAfdian, parseGuokr, parseYande
 } from "./lib.js";
@@ -40,6 +40,7 @@ const ROUTES = [
   ["/bing", "Bing 每日壁纸"],
   ["/nasa/apod", "NASA 天文每日一图"],
   ["/zhihu/daily", "知乎日报（?date=YYYYMMDD 可翻历史）"],
+  ["/aihot/daily", "AIHOT AI 日报 详细版（?limit=7 / ?date=YYYY-MM-DD）"],
   ["/bjp/apod", "北京天文馆 每日一图"],
   ["/pixiv/ranking/day", "pixiv 排行（day/week/month/day_male/day_female/week_original/week_rookie…）"],
   ["/pixiv/user/159912", "pixiv 用户动态（填 user id）"],
@@ -127,7 +128,40 @@ export default {
         return new Response(finalize(pz, pz.items, origin, selfUrl), { headers: XML });
       }
 
-      // ---- 北京天文馆 ----
+      // ---- AIHOT 日报（用它的 agent 版 Markdown，原样抄一份）----
+      if (seg[0] === "aihot" && seg[1] === "daily") {
+        const one = q.get("date");
+        const limit = Math.min(Number(q.get("limit")) || 7, 30);
+        let dates;
+        if (one && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(one)) dates = [one];
+        else {
+          const idxJson = await getJson("https://aihot.news/api/v1/dailies");
+          dates = (idxJson.items || []).slice(0, limit).map(function (x) { return x.date; });
+        }
+        const mds = await Promise.all(dates.map(function (dd) {
+          return getText("https://aihot.news/api/v1/agent/daily/" + dd, { "User-Agent": "aihot-api/2.0.0 cat-feeder" });
+        }));
+        const pages = await Promise.all(dates.map(function (dd) {
+          return getText("https://aihot.news/daily/" + dd).catch(function () { return ""; });
+        }));
+        const his = pages.map(function (h) { return parseAihotHighlights(h); });
+        const leads = pages.map(function (h) { return parseAihotLead(h); });
+        const its = dates.map(function (dd, i) {
+          const lead = aihotLeadOf(mds[i]);
+          return {
+            title: "AI 日报 · " + dd + (lead ? " — " + lead : ""),
+            link: "https://aihot.news/daily/" + dd,
+            guid: "aihot-daily-" + dd,
+            pubDate: dd + "T08:00:00+08:00",
+            image: aihotDailyCover(dd),
+            description: renderAihotMarkdown(mds[i], dd, his[i], leads[i])
+          };
+        });
+        const pa = { title: "AIHOT · AI 日报", link: "https://aihot.news/daily", items: its };
+        return new Response(finalize(pa, pa.items, origin, selfUrl), { headers: XML });
+      }
+
+      // ---- 北京天文馆 ----      // ---- 北京天文馆 ----
       if (path === "/bjp/apod") {
         const html = await getText("https://www.bjp.org.cn/APOD/list.shtml");
         const limit = Math.min(Number(q.get("limit")) || 10, 20);

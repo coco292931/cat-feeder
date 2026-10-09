@@ -151,6 +151,129 @@ export function parseZhihuDaily(json, day) {
   return { title: "知乎日报" + (day ? " " + day.slice(0, 10) : ""), link: "https://daily.zhihu.com/", items: items };
 }
 
+// ---------- AIHOT 日报 ----------
+// 正文走它给 Agent 的 Markdown（/api/v1/agent/daily/<date>）：排版本来就是
+// 「头条 -> 各栏目 + 简介 -> 快讯」，比 JSON 那份省事，还自带「来源 / 另有 N 家信源报道」。
+// 里面缺的两样去日报页 HTML 里补：头条导语、今日看点。期号是自己算的（第 1 期 = 2026-04-22）。
+var AIHOT_ISSUE1 = Date.parse("2026-04-22T00:00:00Z");
+
+export function aihotIssueNo(date) {
+  var t = Date.parse(String(date) + "T00:00:00Z");
+  return isNaN(t) ? 0 : Math.round((t - AIHOT_ISSUE1) / 86400000) + 1;
+}
+
+export function aihotDailyCover(date) {
+  return date ? ("https://aihot.news/og/reports/daily/" + date + ".png") : "";
+}
+
+export function aihotLeadOf(md) {
+  var m = /^头条[:：]\s*(.+)$/m.exec(String(md || ""));
+  return m ? m[1].trim() : "";
+}
+
+// 头条导语：头版 section 里的第一个 <p>（class 带 leading-[1.9]，跟接口的 leadParagraph 一致）
+export function parseAihotLead(html) {
+  var s = String(html || "");
+  var i = s.indexOf("头版");
+  if (i < 0) i = s.indexOf("头条");
+  if (i < 0) return "";
+  var chunk = s.slice(i, i + 8000);
+  var m = /<p[^>]*leading-\[1\.9\][^>]*>([\s\S]*?)<\/p>/.exec(chunk);
+  if (!m) m = /<p[^>]*>([^<]{40,})<\/p>/.exec(chunk);
+  return m ? decodeEntities(m[1].replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim() : "";
+}
+
+// 今日看点：头版 section 里头条下面那个 <ol>
+export function parseAihotHighlights(html) {
+  var s = String(html || "");
+  var i = s.indexOf("看点");
+  if (i < 0) return [];
+  var ol = s.indexOf("<ol", i);
+  if (ol < 0) return [];
+  var end = s.indexOf("</ol>", ol);
+  var chunk = s.slice(ol, end < 0 ? ol + 8000 : end);
+  var out = [];
+  var re = /<li><a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/li>/g;
+  var m;
+  while ((m = re.exec(chunk)) !== null) {
+    var inner = m[2];
+    var rank = "", title = "", src = "";
+    var sre = /<span([^>]*)>([^<]*)<\/span>/g, sm;
+    while ((sm = sre.exec(inner)) !== null) {
+      var cls = sm[1], txt = decodeEntities(sm[2]).replace(/\s+/g, " ").trim();
+      if (!txt) continue;
+      if (!rank && cls.indexOf("num") >= 0 && /^[0-9]+$/.test(txt)) rank = txt;
+      else if (!title && cls.indexOf("font-bold") >= 0) title = txt;
+      else if (!src && cls.indexOf("truncate") >= 0) src = txt;
+    }
+    if (title) out.push({ rank: rank || String(out.length + 1), title: title, source: src });
+  }
+  return out;
+}
+
+export function renderAihotMarkdown(md, date, highlights, lead) {
+  var raw = String(md || "").split("\n");
+  var s = -1, e = -1;
+  raw.forEach(function (l, i) {
+    if (s < 0 && l.indexOf("不可信外部资料开始") >= 0) s = i;
+    if (l.indexOf("不可信外部资料结束") >= 0) e = i;
+  });
+  var body = raw.slice(s < 0 ? 0 : s + 1, e < 0 ? raw.length : e);
+  var wk = ["日", "一", "二", "三", "四", "五", "六"];
+  var dt = new Date(String(date) + "T00:00:00+08:00");
+  var n = aihotIssueNo(date);
+  var L = [];
+  var seenHi = 0;
+  if (n > 0) L.push("<p class=\"issue\">第 " + n + " 期 · " + date + (isNaN(dt.getTime()) ? "" : " · 星期" + wk[dt.getDay()]) + " · 每天 08:00 出刊</p>");
+  var hiBlock = function () {
+    if (seenHi || !highlights || !highlights.length) return;
+    seenHi = 1;
+    L.push("<h2>今日看点</h2>");
+    L.push("<ol>");
+    highlights.forEach(function (hi) {
+      L.push("<li><b>" + esc(hi.title) + "</b>" + (hi.source ? "<small>" + esc(hi.source) + "</small>" : "") + "</li>");
+    });
+    L.push("</ol>");
+  };
+  body.forEach(function (line) {
+    if (!line.trim()) return;
+    var plain = line.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+    var m;
+    if ((m = /^头条[:：]\s*(.+)$/.exec(plain))) {
+      L.push("<h2>头条</h2>");
+      L.push("<h3 class=\"hl\">" + esc(m[1]) + "</h3>");
+      if (lead) L.push("<p>" + esc(lead) + "</p>");
+      return;
+    }
+    if ((m = /^【(.+)】$/.exec(plain)) || (m = /^#+\s*(.+)$/.exec(plain))) {
+      hiBlock();
+      L.push("<h2>" + esc(m[1]) + "</h2>");
+      return;
+    }
+    if ((m = /^\d+\.\s+(.+)$/.exec(plain))) {
+      var parts = m[1].split(" · ");
+      var t = parts.shift();
+      L.push("<h3>" + esc(t) + "</h3>");
+      if (parts.length) L.push("<p class=\"src\"><small>" + esc(parts.join(" · ")) + "</small></p>");
+      return;
+    }
+    if ((m = /^-\s+(.+)$/.exec(plain))) {
+      if (/^相关[:：]/.test(m[1])) return;
+      var bits = m[1].split(" · ");
+      var tm = /^(\d{2}-\d{2} \d{2}:\d{2})$/.exec(bits[0]);
+      if (tm) {
+        bits.shift();
+        var src = bits.length > 1 ? bits.pop() : "";
+        L.push("<p class=\"flash\"><b>" + esc(bits.join(" · ")) + "</b><small>" + esc([src, tm[1]].filter(Boolean).join(" · ")) + "</small></p>");
+      } else {
+        L.push("<p class=\"flash\"><b>" + esc(m[1]) + "</b></p>");
+      }
+      return;
+    }
+    L.push("<p>" + esc(plain) + "</p>");
+  });
+  return L.join("\n");
+}
 // ---------- 北京天文馆 ----------
 export function parseBjpList(html, limit) {
   var out = [];
