@@ -1,0 +1,8 @@
+name = "cat-feeder"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# 这个 name 必须和 Cloudflare 面板里那个 Worker 的名字一模一样，Workers Builds 的 Git
+# 集成靠它对上，对不上构建会直接失败。
+# 没有需要配的密钥：NASA 走的是官方 feed，不需要 api key。
