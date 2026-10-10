@@ -310,7 +310,7 @@ export function renderAihotMarkdown(md, date, highlights, lead, originals) {
     L.push("<h2>今日看点</h2>");
     L.push("<ol>");
     highlights.forEach(function (hi) {
-      L.push("<li><a href=\"" + esc(hi.url) + "\"><b>" + esc(hi.title) + "</b></a>" + (hi.source ? "<small>" + esc(hi.source) + "</small>" : "") + "</li>");
+      L.push("<li><a href=\"" + esc(hi.url) + "\"><b>" + esc(hi.title) + "</b></a><br>" + (hi.source ? "<small>" + esc(hi.source) + "</small>" : "") + "</li>");
     });
     L.push("</ol>");
   };
@@ -333,7 +333,7 @@ export function renderAihotMarkdown(md, date, highlights, lead, originals) {
       return;
     }
     if (x.k === "flash") {
-      L.push("<p class=\"flash\">" + (x.url ? "<a href=\"" + esc(x.url) + "\"><b>" + esc(x.title) + "</b></a>" : "<b>" + esc(x.title) + "</b>") + (x.meta ? "<small>" + esc(x.meta) + "</small>" : "") + "</p>");
+      L.push("<p class=\"flash\">" + (x.url ? "<a href=\"" + esc(x.url) + "\"><b>" + esc(x.title) + "</b></a>" : "<b>" + esc(x.title) + "</b>") + "<br>" + (x.meta ? "<small>" + esc(x.meta) + "</small>" : "") + "</p>");
       return;
     }
     L.push("<p>" + esc(x.text) + "</p>");
