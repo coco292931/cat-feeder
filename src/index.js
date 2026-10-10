@@ -1,6 +1,6 @@
 import {
   UA, PIXIV_HEADERS, esc, buildFeed,
-  parseBing, parseApodFeed, parseZhihuDaily, renderAihotMarkdown, aihotLeadOf, parseAihotHighlights, parseAihotLead, aihotDailyCover, parseBjpList, parseBjpItem,
+  parseBing, parseApodFeed, parseZhihuDaily, zhihuStoryHtml, renderAihotMarkdown, aihotLeadOf, parseAihotHighlights, parseAihotLead, aihotDailyCover, parseBjpList, parseBjpItem,
   parsePixivRanking, parsePixivUser, pixivRankApiMode,
   parseMittrchina, parseYcwb, parseAfdian, parseGuokr, parseYande
 } from "./lib.js";
@@ -125,6 +125,13 @@ export default {
         const d = String(j.date || "");
         const day = d.length === 8 ? d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8) + "T00:00:00+08:00" : "";
         const pz = parseZhihuDaily(j, day);
+        await Promise.all(pz.items.map(async function (it) {
+          const id = (/([0-9]+)\/?$/.exec(it.link) || [])[1];
+          if (!id) return;
+          try {
+            it.description = zhihuStoryHtml(await getJson("https://daily.zhihu.com/api/4/news/" + id));
+          } catch (err) { /* 单篇拿不到就不带正文，不影响整条 feed */ }
+        }));
         return new Response(finalize(pz, pz.items, origin, selfUrl), { headers: XML });
       }
 

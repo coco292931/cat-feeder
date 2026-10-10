@@ -143,7 +143,7 @@ export function parseZhihuDaily(json, day) {
       link: s.url || ("https://daily.zhihu.com/story/" + s.id),
       image: img,
       pubDate: day,
-      description: s.hint ? "<p>" + esc(s.hint) + "</p>" : ""
+      description: ""
     });
   };
   (json.top_stories || []).forEach(push);
@@ -151,10 +151,19 @@ export function parseZhihuDaily(json, day) {
   return { title: "知乎日报" + (day ? " " + day.slice(0, 10) : ""), link: "https://daily.zhihu.com/", items: items };
 }
 
+// 单篇正文：daily.zhihu.com/api/4/news/<id>，body 本身就是排好版的 HTML。
+// 它自带的 css 挂在 news-at.zhihu.com 上（已经死了），所以不引，交给阅读器自己的样式。
+export function zhihuStoryHtml(s) {
+  var body = String((s && s.body) || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "");
+  // 头图不用在这儿加，item.image 已经由 buildFeed 渲染了，再加就重复
+  return body;
+}
 // ---------- AIHOT 日报 ----------
 // 正文走它给 Agent 的 Markdown（/api/v1/agent/daily/<date>）：排版本来就是
-// 「头条 -> 各栏目 + 简介 -> 快讯」，比 JSON 那份省事，还自带「来源 / 另有 N 家信源报道」。
-// 里面缺的两样去日报页 HTML 里补：头条导语、今日看点。期号是自己算的（第 1 期 = 2026-04-22）。
+// 「头条 -> 各栏目 + 简介 -> 快讯」，还自带「来源 / 另有 N 家信源报道」。
+// 里面缺的两样去日报页 HTML 里补：头条导语、今日看点。期号自己算（第 1 期 = 2026-04-22）。
 var AIHOT_ISSUE1 = Date.parse("2026-04-22T00:00:00Z");
 
 export function aihotIssueNo(date) {
@@ -171,7 +180,7 @@ export function aihotLeadOf(md) {
   return m ? m[1].trim() : "";
 }
 
-// 头条导语：头版 section 里的第一个 <p>（class 带 leading-[1.9]，跟接口的 leadParagraph 一致）
+// 头条导语：头版 section 里的第一个 <p>（class 带 leading-[1.9]）
 export function parseAihotLead(html) {
   var s = String(html || "");
   var i = s.indexOf("头版");
@@ -183,7 +192,7 @@ export function parseAihotLead(html) {
   return m ? decodeEntities(m[1].replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim() : "";
 }
 
-// 今日看点：头版 section 里头条下面那个 <ol>
+// 今日看点：头版 section 里头条下面那个 <ol>；href 是 /daily/<date>#r-<条目id>
 export function parseAihotHighlights(html) {
   var s = String(html || "");
   var i = s.indexOf("看点");
@@ -206,7 +215,14 @@ export function parseAihotHighlights(html) {
       else if (!title && cls.indexOf("font-bold") >= 0) title = txt;
       else if (!src && cls.indexOf("truncate") >= 0) src = txt;
     }
-    if (title) out.push({ rank: rank || String(out.length + 1), title: title, source: src });
+    if (!title) continue;
+    var idm = /#r-([A-Za-z0-9]+)/.exec(m[1]);
+    out.push({
+      rank: rank || String(out.length + 1),
+      title: title,
+      source: src,
+      url: idm ? ("https://aihot.news/items/" + idm[1]) : "https://aihot.news/daily"
+    });
   }
   return out;
 }
@@ -219,42 +235,20 @@ export function renderAihotMarkdown(md, date, highlights, lead) {
     if (l.indexOf("不可信外部资料结束") >= 0) e = i;
   });
   var body = raw.slice(s < 0 ? 0 : s + 1, e < 0 ? raw.length : e);
-  var wk = ["日", "一", "二", "三", "四", "五", "六"];
-  var dt = new Date(String(date) + "T00:00:00+08:00");
-  var n = aihotIssueNo(date);
-  var L = [];
-  var seenHi = 0;
-  if (n > 0) L.push("<p class=\"issue\">第 " + n + " 期 · " + date + (isNaN(dt.getTime()) ? "" : " · 星期" + wk[dt.getDay()]) + " · 每天 08:00 出刊</p>");
-  var hiBlock = function () {
-    if (seenHi || !highlights || !highlights.length) return;
-    seenHi = 1;
-    L.push("<h2>今日看点</h2>");
-    L.push("<ol>");
-    highlights.forEach(function (hi) {
-      L.push("<li><b>" + esc(hi.title) + "</b>" + (hi.source ? "<small>" + esc(hi.source) + "</small>" : "") + "</li>");
-    });
-    L.push("</ol>");
-  };
+
+  // 第一趟：拆成结构，顺手把标题和链接对上
+  var seq = [];
   body.forEach(function (line) {
     if (!line.trim()) return;
+    var lm = /\[([^\]]+)\]\(([^)]+)\)/.exec(line);
+    var url = lm ? lm[2] : "";
     var plain = line.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
     var m;
-    if ((m = /^头条[:：]\s*(.+)$/.exec(plain))) {
-      L.push("<h2>头条</h2>");
-      L.push("<h3 class=\"hl\">" + esc(m[1]) + "</h3>");
-      if (lead) L.push("<p>" + esc(lead) + "</p>");
-      return;
-    }
-    if ((m = /^【(.+)】$/.exec(plain)) || (m = /^#+\s*(.+)$/.exec(plain))) {
-      hiBlock();
-      L.push("<h2>" + esc(m[1]) + "</h2>");
-      return;
-    }
+    if ((m = /^头条[:：]\s*(.+)$/.exec(plain))) { seq.push({ k: "lead", title: m[1] }); return; }
+    if ((m = /^【(.+)】$/.exec(plain)) || (m = /^#+\s*(.+)$/.exec(plain))) { seq.push({ k: "h2", text: m[1] }); return; }
     if ((m = /^\d+\.\s+(.+)$/.exec(plain))) {
       var parts = m[1].split(" · ");
-      var t = parts.shift();
-      L.push("<h3>" + esc(t) + "</h3>");
-      if (parts.length) L.push("<p class=\"src\"><small>" + esc(parts.join(" · ")) + "</small></p>");
+      seq.push({ k: "item", title: parts.shift(), meta: parts.join(" · "), url: url });
       return;
     }
     if ((m = /^-\s+(.+)$/.exec(plain))) {
@@ -264,13 +258,57 @@ export function renderAihotMarkdown(md, date, highlights, lead) {
       if (tm) {
         bits.shift();
         var src = bits.length > 1 ? bits.pop() : "";
-        L.push("<p class=\"flash\"><b>" + esc(bits.join(" · ")) + "</b><small>" + esc([src, tm[1]].filter(Boolean).join(" · ")) + "</small></p>");
+        seq.push({ k: "flash", title: bits.join(" · "), meta: [src, tm[1]].filter(Boolean).join(" · "), url: url });
       } else {
-        L.push("<p class=\"flash\"><b>" + esc(m[1]) + "</b></p>");
+        seq.push({ k: "flash", title: m[1], meta: "", url: url });
       }
       return;
     }
-    L.push("<p>" + esc(plain) + "</p>");
+    seq.push({ k: "p", text: plain });
+  });
+
+  // 标题 -> 链接，给头条用（头条那行本身不带链接）
+  var urls = {};
+  seq.forEach(function (x) { if (x.k === "item" && x.url) urls[x.title] = x.url; });
+
+  var wk = ["日", "一", "二", "三", "四", "五", "六"];
+  var dt = new Date(String(date) + "T00:00:00+08:00");
+  var n = aihotIssueNo(date);
+  var dailyUrl = "https://aihot.news/daily/" + date;
+  var L = [];
+  var seenHi = 0;
+  if (n > 0) L.push("<p class=\"issue\">第 " + n + " 期 · " + date + (isNaN(dt.getTime()) ? "" : " · 星期" + wk[dt.getDay()]) + " · 每天 08:00 出刊</p>");
+  var hiBlock = function () {
+    if (seenHi || !highlights || !highlights.length) return;
+    seenHi = 1;
+    L.push("<h2>今日看点</h2>");
+    L.push("<ol>");
+    highlights.forEach(function (hi) {
+      L.push("<li><a href=\"" + esc(hi.url) + "\"><b>" + esc(hi.title) + "</b></a>" + (hi.source ? "<small>" + esc(hi.source) + "</small>" : "") + "</li>");
+    });
+    L.push("</ol>");
+  };
+  seq.forEach(function (x) {
+    if (x.k === "lead") {
+      L.push("<h2>头条</h2>");
+      var lu = urls[x.title] || dailyUrl;
+      L.push("<h3 class=\"hl\"><a href=\"" + esc(lu) + "\">" + esc(x.title) + "</a></h3>");
+      if (lead) L.push("<p>" + esc(lead) + "</p>");
+      return;
+    }
+    if (x.k === "h2") { hiBlock(); L.push("<h2>" + esc(x.text) + "</h2>"); return; }
+    if (x.k === "item") {
+      L.push(x.url
+        ? "<h3><a href=\"" + esc(x.url) + "\">" + esc(x.title) + "</a></h3>"
+        : "<h3>" + esc(x.title) + "</h3>");
+      if (x.meta) L.push("<p class=\"src\"><small>" + esc(x.meta) + "</small></p>");
+      return;
+    }
+    if (x.k === "flash") {
+      L.push("<p class=\"flash\">" + (x.url ? "<a href=\"" + esc(x.url) + "\"><b>" + esc(x.title) + "</b></a>" : "<b>" + esc(x.title) + "</b>") + (x.meta ? "<small>" + esc(x.meta) + "</small>" : "") + "</p>");
+      return;
+    }
+    L.push("<p>" + esc(x.text) + "</p>");
   });
   return L.join("\n");
 }
