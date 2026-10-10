@@ -1,6 +1,7 @@
 import {
   UA, PIXIV_HEADERS, esc, buildFeed,
-  parseBing, parseApodFeed, parseZhihuDaily, zhihuStoryHtml, renderAihotMarkdown, aihotLeadOf, parseAihotHighlights, parseAihotLead, aihotDailyCover, parseBjpList, parseBjpItem,
+  parseBing, parseApodFeed, parseZhihuDaily, zhihuStoryHtml, renderAihotMarkdown,
+  sanitizeHtml, guokrContent, mittrContent, bjpText, ycwbArticle, aihotLeadOf, parseAihotHighlights, parseAihotLead, aihotDailyCover, parseBjpList, parseBjpItem,
   parsePixivRanking, parsePixivUser, pixivRankApiMode,
   parseMittrchina, parseYcwb, parseAfdian, parseGuokr, parseYande
 } from "./lib.js";
@@ -168,21 +169,20 @@ export default {
         return new Response(finalize(pa, pa.items, origin, selfUrl), { headers: XML });
       }
 
-      // ---- 北京天文馆 ----      // ---- 北京天文馆 ----
+      // ---- 北京天文馆（正文也在详情页里，顺路抠出来）----
       if (path === "/bjp/apod") {
         const html = await getText("https://www.bjp.org.cn/APOD/list.shtml");
         const limit = Math.min(Number(q.get("limit")) || 10, 20);
         const list = parseBjpList(html, limit);
         if (!list.length) throw new Error("bjp 列表解析为空，页面结构可能变了");
         const items = await Promise.all(list.map(async function (e) {
-          let img = "";
-          try { img = parseBjpItem(await getText(e.link)); } catch (err) { /* 单篇失败不影响整条 feed */ }
-          return { title: e.title, link: e.link, image: img, pubDate: e.date };
+          let img = "", body = "";
+          try { const page = await getText(e.link); img = parseBjpItem(page); body = bjpText(page); } catch (err) { /* 单篇失败不影响整条 */ }
+          return { title: e.title, link: e.link, image: img, pubDate: e.date, description: body };
         }));
         const p = { title: "北京天文馆 每日一图", link: "https://www.bjp.org.cn/APOD/list.shtml", items: items };
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
       }
-
       // ---- pixiv 排行 ----
       if (seg[0] === "pixiv" && seg[1] === "ranking" && seg[2]) {
         const mode = seg[2];
@@ -206,7 +206,7 @@ export default {
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
       }
 
-      // ---- MIT 科技评论 ----
+      // ---- MIT 科技评论（每篇再取一次详情拿正文）----
       if (seg[0] === "mittrchina") {
         const type = seg[1] || "index";
         const apiPath = { index: "/information/index", hot: "/information/hot", breaking: "/flash", video: "/movie/index" }[type];
@@ -225,17 +225,28 @@ export default {
           j = await getJson("https://apii.web.mittrchina.com" + apiPath + "?limit=" + limit);
         }
         const p = parseMittrchina(j);
+        await Promise.all(p.items.map(async function (it) {
+          const id = (/([0-9]+)$/.exec(it.link) || [])[1];
+          if (!id) return;
+          try { it.description = mittrContent(await getJson("https://apii.web.mittrchina.com/information/details?id=" + id)); }
+          catch (err) { /* 拿不到就用原来的摘要 */ }
+        }));
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
       }
-
-      // ---- 羊城晚报 ----
+      // ---- 羊城晚报（每篇取文章页，正文在 .main_article）----
       if (seg[0] === "ycwb") {
         const node = seg[1] || "1";
         const j = await getJson("https://6api.ycwb.com/app_if/jy/getArticles?nodeid=" + encodeURIComponent(node) + "&pagesize=15");
         const p = parseYcwb(j);
+        await Promise.all(p.items.map(async function (it) {
+          try {
+            // 羊城晚报的 WAF 见到浏览器 UA 就甩 JS 挑战页，这里故意用非浏览器 UA
+            const body = ycwbArticle(await getText(it.link, { "User-Agent": "cat-feeder/1.0 (+rss)" }));
+            if (body) it.description = body + (it.description || "");
+          } catch (err) { /* 拿不到就留摘要 */ }
+        }));
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
       }
-
       // ---- 爱发电 ----
       if (seg[0] === "afdian" && seg[1] === "dynamic" && seg[2]) {
         const slug = seg[2].replace(/^@/, "");
@@ -247,10 +258,16 @@ export default {
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
       }
 
-      // ---- 果壳 ----
+      // ---- 果壳（正文走 apis.guokr.com/minisite/article/<id>.json）----
       if (seg[0] === "guokr" && seg[1] === "scientific") {
         const j = await getJson("https://www.guokr.com/beta/proxy/science_api/articles?retrieve_type=by_category&page=1");
         const p = parseGuokr(j, "果壳网 科学人", "https://www.guokr.com/scientific");
+        await Promise.all(p.items.map(async function (it) {
+          const id = (/article\/([0-9]+)/.exec(it.link) || [])[1];
+          if (!id) return;
+          try { const body = guokrContent(await getJson("https://apis.guokr.com/minisite/article/" + id + ".json")); if (body) it.description = body; }
+          catch (err) { /* 拿不到就留摘要 */ }
+        }));
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
       }
       if (seg[0] === "guokr" && seg[1] === "column" && seg[2]) {
@@ -262,9 +279,14 @@ export default {
         if (!list.length) return new Response("该栏目没有内容: " + seg[2], { status: 404 });
         const name = list[0].channels && list[0].channels[0] ? list[0].channels[0].name : seg[2];
         const p = parseGuokr(list, "果壳网 " + name, "https://www.guokr.com/");
+        await Promise.all(p.items.map(async function (it) {
+          const id = (/article\/([0-9]+)/.exec(it.link) || [])[1];
+          if (!id) return;
+          try { const body = guokrContent(await getJson("https://apis.guokr.com/minisite/article/" + id + ".json")); if (body) it.description = body; }
+          catch (err) { /* 拿不到就留摘要 */ }
+        }));
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
       }
-
       // ---- yande ----
       if (seg[0] === "yande" && seg[1] === "post" && seg[2] === "popular_recent") {
         const period = seg[3] || "1w";

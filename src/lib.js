@@ -436,6 +436,61 @@ export function parseAfdian(profile, posts) {
   return { title: (user.name || "") + " 的爱发电动态", link: "https://afdian.com/a/" + (user.url_slug || ""), image: user.avatar || "", items: items };
 }
 
+// ---------- 正文提取（阅读器要正文，光有摘要它抓不动 SPA 页面）----------
+export function sanitizeHtml(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<img([^>]*?)\sdata-src="([^"]+)"/gi, "<img$1 src=\"$2\"")
+    .replace(/\s(?:style|class|data-[a-z-]+|align|lang|dir|width|height)="[^"]*"/gi, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/>\s+</g, "><")
+    .replace(/\s+$/g, "")
+    .trim();
+}
+
+// 果壳：apis.guokr.com/minisite/article/<id>.json 的 result.content 就是排好的 HTML
+export function guokrContent(json) {
+  return sanitizeHtml((json && json.result && json.result.content) || "");
+}
+
+// MIT 科技评论：/information/details?id=<id> 的 data.content（纯文本，按行分段）
+export function mittrContent(json) {
+  var c = (json && json.data && json.data.content) || "";
+  if (/<[a-z][^>]*>/i.test(c)) return sanitizeHtml(c);
+  return String(c).split(/\n+/).map(function (x) { return x.trim(); }).filter(Boolean)
+    .map(function (x) { return "<p>" + esc(x) + "</p>"; }).join("");
+}
+
+// 北京天文馆：正文就在详情页那几个 <p> 里（第一段是站点介绍，丢掉）
+export function bjpText(html) {
+  var out = [];
+  var re = /<p[^>]*>([\s\S]*?)<\/p>/gi, m;
+  while ((m = re.exec(String(html || ""))) !== null) {
+    var t = decodeEntities(m[1].replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+    if (!t || t.indexOf("探索宇宙") === 0) continue;
+    out.push("<p>" + esc(t) + "</p>");
+  }
+  return out.join("");
+}
+
+// 羊城晚报：正文在 .main_article 里，后面跟着分享/评论之类，切掉
+export function ycwbArticle(html) {
+  var s = String(html || "");
+  var i = s.indexOf("main_article");
+  if (i < 0) return "";
+  var start = s.indexOf(">", i);
+  if (start < 0) return "";
+  var seg = s.slice(start + 1, start + 30000);
+  var cuts = ["<div class=\"share", "<div class=\"comments", "<div class=\"foot", "<div class=\"related", "<!-- 百度分享"];
+  var end = seg.length;
+  cuts.forEach(function (c) { var k = seg.indexOf(c); if (k > 0 && k < end) end = k; });
+  return sanitizeHtml(seg.slice(0, end));
+}
+
 // ---------- 果壳 ----------
 export function parseGuokr(list, title, link) {
   var items = (list || []).map(function (a) {
