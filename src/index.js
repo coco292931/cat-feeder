@@ -260,8 +260,11 @@ export default {
 
       // ---- 果壳（正文走 apis.guokr.com/minisite/article/<id>.json）----
       if (seg[0] === "guokr" && seg[1] === "scientific") {
+        // 这是条资讯流，默认只出 5 条；正文留着
+        const limit = Math.min(Number(q.get("limit")) || 5, 20);
         const j = await getJson("https://www.guokr.com/beta/proxy/science_api/articles?retrieve_type=by_category&page=1");
-        const p = parseGuokr(j, "果壳网 科学人", "https://www.guokr.com/scientific");
+        const list = (Array.isArray(j) ? j : []).slice(0, limit);
+        const p = parseGuokr(list, "果壳网 科学人", "https://www.guokr.com/scientific");
         await Promise.all(p.items.map(async function (it) {
           const id = (/article\/([0-9]+)/.exec(it.link) || [])[1];
           if (!id) return;
@@ -279,12 +282,8 @@ export default {
         if (!list.length) return new Response("该栏目没有内容: " + seg[2], { status: 404 });
         const name = list[0].channels && list[0].channels[0] ? list[0].channels[0].name : seg[2];
         const p = parseGuokr(list, "果壳网 " + name, "https://www.guokr.com/");
-        await Promise.all(p.items.map(async function (it) {
-          const id = (/article\/([0-9]+)/.exec(it.link) || [])[1];
-          if (!id) return;
-          try { const body = guokrContent(await getJson("https://apis.guokr.com/minisite/article/" + id + ".json")); if (body) it.description = body; }
-          catch (err) { /* 拿不到就留摘要 */ }
-        }));
+        // 这是公众号式的长文（每篇二三十张图、两三万字），而且这个栏目 2025 年 3 月就停更了，
+        // 全文只会把 feed 撑到几百 KB，所以这里只出摘要。
         return new Response(finalize(p, p.items, origin, selfUrl), { headers: XML });
       }
       // ---- yande ----
