@@ -1,7 +1,7 @@
 import {
   UA, PIXIV_HEADERS, esc, buildFeed,
   parseBing, parseApodFeed, parseZhihuDaily, zhihuStoryHtml, renderAihotMarkdown,
-  sanitizeHtml, guokrContent, mittrContent, bjpText, ycwbArticle, aihotLeadOf, parseAihotHighlights, parseAihotLead, aihotDailyCover, parseBjpList, parseBjpItem,
+  sanitizeHtml, guokrContent, mittrContent, bjpText, ycwbArticle, aihotLeadOf, parseAihotHighlights, parseAihotLead, aihotOriginalMap, aihotDailyCover, parseBjpList, parseBjpItem,
   parsePixivRanking, parsePixivUser, pixivRankApiMode,
   parseMittrchina, parseYcwb, parseAfdian, parseGuokr, parseYande
 } from "./lib.js";
@@ -154,6 +154,10 @@ export default {
         }));
         const his = pages.map(function (h) { return parseAihotHighlights(h); });
         const leads = pages.map(function (h) { return parseAihotLead(h); });
+        const origs = await Promise.all(dates.map(async function (dd) {
+          try { return aihotOriginalMap(await getJson("https://aihot.news/api/v1/dailies/" + dd)); }
+          catch (err) { return {}; }
+        }));
         const its = dates.map(function (dd, i) {
           const lead = aihotLeadOf(mds[i]);
           return {
@@ -162,7 +166,7 @@ export default {
             guid: "aihot-daily-" + dd,
             pubDate: dd + "T08:00:00+08:00",
             image: aihotDailyCover(dd),
-            description: renderAihotMarkdown(mds[i], dd, his[i], leads[i])
+            description: renderAihotMarkdown(mds[i], dd, his[i], leads[i], origs[i])
           };
         });
         const pa = { title: "AIHOT · AI 日报", link: "https://aihot.news/daily", items: its };

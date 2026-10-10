@@ -227,7 +227,33 @@ export function parseAihotHighlights(html) {
   return out;
 }
 
-export function renderAihotMarkdown(md, date, highlights, lead) {
+// 条目 id -> 原站原文链接。Markdown 那份里只有 AIHOT 站内链接，原文要从 JSON 接口拿。
+export function aihotOriginalMap(json) {
+  var map = {};
+  var rep = (json && json.report) || {};
+  var take = function (i) {
+    if (!i || !i.links) return;
+    var m = /\/items\/([A-Za-z0-9]+)/.exec(i.links.aihot || "");
+    if (m && i.links.original) map[m[1]] = i.links.original;
+  };
+  (rep.sections || []).forEach(function (s) { (s.items || []).forEach(take); });
+  (rep.flashes || []).forEach(take);
+  return map;
+}
+
+export function renderAihotMarkdown(md, date, highlights, lead, originals) {
+  var origLink = function (u) {
+    var m = /\/items\/([A-Za-z0-9]+)/.exec(u || "");
+    var o = (m && originals && originals[m[1]]) || "";
+    return o ? ("<a href=\"" + esc(o) + "\">原文</a>") : "";
+  };
+  var metaLine = function (meta, url) {
+    var parts = [];
+    if (meta) parts.push(esc(meta));
+    var o = origLink(url);
+    if (o) parts.push(o);
+    return parts.join(" · ");
+  };
   var raw = String(md || "").split("\n");
   var s = -1, e = -1;
   raw.forEach(function (l, i) {
@@ -284,7 +310,7 @@ export function renderAihotMarkdown(md, date, highlights, lead) {
     L.push("<h2>今日看点</h2>");
     L.push("<ol>");
     highlights.forEach(function (hi) {
-      L.push("<li><a href=\"" + esc(hi.url) + "\"><b>" + esc(hi.title) + "</b></a>" + (hi.source ? "<small>" + esc(hi.source) + "</small>" : "") + "</li>");
+      L.push("<li><a href=\"" + esc(hi.url) + "\"><b>" + esc(hi.title) + "</b></a><small>" + (hi.source ? esc(hi.source) + (origLink(hi.url) ? " · " : "") : "") + origLink(hi.url) + "</small></li>");
     });
     L.push("</ol>");
   };
@@ -294,6 +320,7 @@ export function renderAihotMarkdown(md, date, highlights, lead) {
       var lu = urls[x.title] || dailyUrl;
       L.push("<h3 class=\"hl\"><a href=\"" + esc(lu) + "\">" + esc(x.title) + "</a></h3>");
       if (lead) L.push("<p>" + esc(lead) + "</p>");
+      if (origLink(lu)) L.push("<p class=\"src\"><small>" + origLink(lu) + "</small></p>");
       return;
     }
     if (x.k === "h2") { hiBlock(); L.push("<h2>" + esc(x.text) + "</h2>"); return; }
@@ -301,11 +328,12 @@ export function renderAihotMarkdown(md, date, highlights, lead) {
       L.push(x.url
         ? "<h3><a href=\"" + esc(x.url) + "\">" + esc(x.title) + "</a></h3>"
         : "<h3>" + esc(x.title) + "</h3>");
-      if (x.meta) L.push("<p class=\"src\"><small>" + esc(x.meta) + "</small></p>");
+      var ml = metaLine(x.meta, x.url);
+      if (ml) L.push("<p class=\"src\"><small>" + ml + "</small></p>");
       return;
     }
     if (x.k === "flash") {
-      L.push("<p class=\"flash\">" + (x.url ? "<a href=\"" + esc(x.url) + "\"><b>" + esc(x.title) + "</b></a>" : "<b>" + esc(x.title) + "</b>") + (x.meta ? "<small>" + esc(x.meta) + "</small>" : "") + "</p>");
+      L.push("<p class=\"flash\">" + (x.url ? "<a href=\"" + esc(x.url) + "\"><b>" + esc(x.title) + "</b></a>" : "<b>" + esc(x.title) + "</b>") + (metaLine(x.meta, x.url) ? "<small>" + metaLine(x.meta, x.url) + "</small>" : "") + "</p>");
       return;
     }
     L.push("<p>" + esc(x.text) + "</p>");
