@@ -303,14 +303,14 @@ export function renderAihotMarkdown(md, date, highlights, lead, originals) {
   var dailyUrl = "https://aihot.news/daily/" + date;
   var L = [];
   var seenHi = 0;
-  if (n > 0) L.push("<p class=\"issue\">第 " + n + " 期 · " + date + (isNaN(dt.getTime()) ? "" : " · 星期" + wk[dt.getDay()]) + " · 每天 08:00 出刊</p>");
+  if (n > 0) L.push("<p class=\"issue\">第 " + n + " 期 · " + date + (isNaN(dt.getTime()) ? "" : " · 星期" + wk[dt.getDay()]) + "</p>");
   var hiBlock = function () {
     if (seenHi || !highlights || !highlights.length) return;
     seenHi = 1;
     L.push("<h2>今日看点</h2>");
     L.push("<ol>");
     highlights.forEach(function (hi) {
-      L.push("<li><a href=\"" + esc(hi.url) + "\"><b>" + esc(hi.title) + "</b></a><small>" + (hi.source ? esc(hi.source) + (origLink(hi.url) ? " · " : "") : "") + origLink(hi.url) + "</small></li>");
+      L.push("<li><a href=\"" + esc(hi.url) + "\"><b>" + esc(hi.title) + "</b></a>" + (hi.source ? "<small>" + esc(hi.source) + "</small>" : "") + "</li>");
     });
     L.push("</ol>");
   };
@@ -333,7 +333,7 @@ export function renderAihotMarkdown(md, date, highlights, lead, originals) {
       return;
     }
     if (x.k === "flash") {
-      L.push("<p class=\"flash\">" + (x.url ? "<a href=\"" + esc(x.url) + "\"><b>" + esc(x.title) + "</b></a>" : "<b>" + esc(x.title) + "</b>") + (metaLine(x.meta, x.url) ? "<small>" + metaLine(x.meta, x.url) + "</small>" : "") + "</p>");
+      L.push("<p class=\"flash\">" + (x.url ? "<a href=\"" + esc(x.url) + "\"><b>" + esc(x.title) + "</b></a>" : "<b>" + esc(x.title) + "</b>") + (x.meta ? "<small>" + esc(x.meta) + "</small>" : "") + "</p>");
       return;
     }
     L.push("<p>" + esc(x.text) + "</p>");
